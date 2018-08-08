@@ -3690,11 +3690,6 @@ u32 glk_plane_color_ctl(const struct intel_crtc_state *crtc_state,
 	plane_color_ctl |= glk_plane_color_ctl_alpha(fb->format->format);
 
 	if (intel_format_is_yuv(fb->format->format)) {
-		if (fb->format->format == DRM_FORMAT_NV12) {
-			plane_color_ctl |=
-				PLANE_COLOR_CSC_MODE_YUV709_TO_RGB709;
-			goto out;
-		}
 		if (plane_state->base.color_encoding == DRM_COLOR_YCBCR_BT709)
 			plane_color_ctl |= PLANE_COLOR_CSC_MODE_YUV709_TO_RGB709;
 		else
@@ -3703,7 +3698,7 @@ u32 glk_plane_color_ctl(const struct intel_crtc_state *crtc_state,
 		if (plane_state->base.color_range == DRM_COLOR_YCBCR_FULL_RANGE)
 			plane_color_ctl |= PLANE_COLOR_YUV_RANGE_CORRECTION_DISABLE;
 	}
-out:
+
 	return plane_color_ctl;
 }
 
@@ -5814,7 +5809,7 @@ static void haswell_crtc_disable(struct intel_crtc_state *old_crtc_state,
 		intel_ddi_set_vc_payload_alloc(intel_crtc->config, false);
 
 	if (!transcoder_is_dsi(cpu_transcoder))
-		intel_ddi_disable_transcoder_func(dev_priv, cpu_transcoder);
+		intel_ddi_disable_transcoder_func(old_crtc_state);
 
 	if (INTEL_GEN(dev_priv) >= 9)
 		skylake_scaler_disable(intel_crtc);
@@ -14474,11 +14469,21 @@ static enum drm_mode_status
 intel_mode_valid(struct drm_device *dev,
 		 const struct drm_display_mode *mode)
 {
+	/*
+	 * Can't reject DBLSCAN here because Xorg ddxen can add piles
+	 * of DBLSCAN modes to the output's mode list when they detect
+	 * the scaling mode property on the connector. And they don't
+	 * ask the kernel to validate those modes in any way until
+	 * modeset time at which point the client gets a protocol error.
+	 * So in order to not upset those clients we silently ignore the
+	 * DBLSCAN flag on such connectors. For other connectors we will
+	 * reject modes with the DBLSCAN flag in encoder->compute_config().
+	 * And we always reject DBLSCAN modes in connector->mode_valid()
+	 * as we never want such modes on the connector's mode list.
+	 */
+
 	if (mode->vscan > 1)
 		return MODE_NO_VSCAN;
-
-	if (mode->flags & DRM_MODE_FLAG_DBLSCAN)
-		return MODE_NO_DBLESCAN;
 
 	if (mode->flags & DRM_MODE_FLAG_HSKEW)
 		return MODE_H_ILLEGAL;
@@ -14641,6 +14646,18 @@ static void quirk_increase_t12_delay(struct drm_device *dev)
 	DRM_INFO("Applying T12 delay quirk\n");
 }
 
+/*
+ * GeminiLake NUC HDMI outputs require additional off time
+ * this allows the onboard retimer to correctly sync to signal
+ */
+static void quirk_increase_ddi_disabled_time(struct drm_device *dev)
+{
+	struct drm_i915_private *dev_priv = to_i915(dev);
+
+	dev_priv->quirks |= QUIRK_INCREASE_DDI_DISABLED_TIME;
+	DRM_INFO("Applying Increase DDI Disabled quirk\n");
+}
+
 struct intel_quirk {
 	int device;
 	int subsystem_vendor;
@@ -14727,6 +14744,13 @@ static struct intel_quirk intel_quirks[] = {
 
 	/* Toshiba Satellite P50-C-18C */
 	{ 0x191B, 0x1179, 0xF840, quirk_increase_t12_delay },
+
+	/* GeminiLake NUC */
+	{ 0x3185, 0x8086, 0x2072, quirk_increase_ddi_disabled_time },
+	{ 0x3184, 0x8086, 0x2072, quirk_increase_ddi_disabled_time },
+	/* ASRock ITX*/
+	{ 0x3185, 0x1849, 0x2212, quirk_increase_ddi_disabled_time },
+	{ 0x3184, 0x1849, 0x2212, quirk_increase_ddi_disabled_time },
 };
 
 static void intel_init_quirks(struct drm_device *dev)

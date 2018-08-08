@@ -1782,15 +1782,24 @@ void intel_ddi_enable_transcoder_func(const struct intel_crtc_state *crtc_state)
 	I915_WRITE(TRANS_DDI_FUNC_CTL(cpu_transcoder), temp);
 }
 
-void intel_ddi_disable_transcoder_func(struct drm_i915_private *dev_priv,
-				       enum transcoder cpu_transcoder)
+void intel_ddi_disable_transcoder_func(const struct intel_crtc_state *crtc_state)
 {
+	struct intel_crtc *crtc = to_intel_crtc(crtc_state->base.crtc);
+	struct drm_i915_private *dev_priv = to_i915(crtc->base.dev);
+	enum transcoder cpu_transcoder = crtc_state->cpu_transcoder;
 	i915_reg_t reg = TRANS_DDI_FUNC_CTL(cpu_transcoder);
 	uint32_t val = I915_READ(reg);
 
 	val &= ~(TRANS_DDI_FUNC_ENABLE | TRANS_DDI_PORT_MASK | TRANS_DDI_DP_VC_PAYLOAD_ALLOC);
 	val |= TRANS_DDI_PORT_NONE;
 	I915_WRITE(reg, val);
+
+	if (dev_priv->quirks & QUIRK_INCREASE_DDI_DISABLED_TIME &&
+	    intel_crtc_has_type(crtc_state, INTEL_OUTPUT_HDMI)) {
+		DRM_DEBUG_KMS("Quirk Increase DDI disabled time\n");
+		/* Quirk time at 100ms for reliable operation */
+		msleep(100);
+	}
 }
 
 int intel_ddi_toggle_hdcp_signalling(struct intel_encoder *intel_encoder,
@@ -2453,12 +2462,13 @@ void icl_map_plls_to_ports(struct drm_crtc *crtc,
 	for_each_new_connector_in_state(old_state, conn, conn_state, i) {
 		struct intel_encoder *encoder =
 			to_intel_encoder(conn_state->best_encoder);
-		enum port port = encoder->port;
+		enum port port;
 		uint32_t val;
 
 		if (conn_state->crtc != crtc)
 			continue;
 
+		port = encoder->port;
 		mutex_lock(&dev_priv->dpll_lock);
 
 		val = I915_READ(DPCLKA_CFGCR0_ICL);
@@ -2490,11 +2500,12 @@ void icl_unmap_plls_to_ports(struct drm_crtc *crtc,
 	for_each_old_connector_in_state(old_state, conn, old_conn_state, i) {
 		struct intel_encoder *encoder =
 			to_intel_encoder(old_conn_state->best_encoder);
-		enum port port = encoder->port;
+		enum port port;
 
 		if (old_conn_state->crtc != crtc)
 			continue;
 
+		port = encoder->port;
 		mutex_lock(&dev_priv->dpll_lock);
 		I915_WRITE(DPCLKA_CFGCR0_ICL,
 			   I915_READ(DPCLKA_CFGCR0_ICL) |

@@ -80,7 +80,7 @@ nfp_flower_repr_get_type_and_port(struct nfp_app *app, u32 port_id, u8 *port)
 			return NFP_REPR_TYPE_VF;
 	}
 
-	return NFP_FLOWER_CMSG_PORT_TYPE_UNSPEC;
+	return __NFP_REPR_TYPE_MAX;
 }
 
 static struct net_device *
@@ -91,6 +91,8 @@ nfp_flower_repr_get(struct nfp_app *app, u32 port_id)
 	u8 port = 0;
 
 	repr_type = nfp_flower_repr_get_type_and_port(app, port_id, &port);
+	if (repr_type > NFP_REPR_TYPE_MAX)
+		return NULL;
 
 	reprs = rcu_dereference(app->reprs[repr_type]);
 	if (!reprs)
@@ -455,6 +457,7 @@ static int nfp_flower_vnic_alloc(struct nfp_app *app, struct nfp_net *nn,
 
 	eth_hw_addr_random(nn->dp.netdev);
 	netif_keep_dst(nn->dp.netdev);
+	nn->vnic_no_name = true;
 
 	return 0;
 

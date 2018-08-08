@@ -16,9 +16,7 @@ LDLIBS += -lcap -lelf -lrt -lpthread
 TEST_CUSTOM_PROGS = $(OUTPUT)/urandom_read
 all: $(TEST_CUSTOM_PROGS)
 
-$(TEST_CUSTOM_PROGS): urandom_read
-
-urandom_read: urandom_read.c
+$(TEST_CUSTOM_PROGS): $(OUTPUT)/%: %.c
 	$(CC) -o $(TEST_CUSTOM_PROGS) -static $< -Wl,--build-id
 
 # Order correspond to 'make run_tests' order
@@ -107,7 +105,7 @@ $(OUTPUT)/test_xdp_noinline.o: CLANG_FLAGS += -fno-inline
 
 BTF_LLC_PROBE := $(shell $(LLC) -march=bpf -mattr=help 2>&1 | grep dwarfris)
 BTF_PAHOLE_PROBE := $(shell $(BTF_PAHOLE) --help 2>&1 | grep BTF)
-BTF_OBJCOPY_PROBE := $(shell $(LLVM_OBJCOPY) --version 2>&1 | grep LLVM)
+BTF_OBJCOPY_PROBE := $(shell $(LLVM_OBJCOPY) --help 2>&1 | grep -i 'usage.*llvm')
 
 ifneq ($(BTF_LLC_PROBE),)
 ifneq ($(BTF_PAHOLE_PROBE),)

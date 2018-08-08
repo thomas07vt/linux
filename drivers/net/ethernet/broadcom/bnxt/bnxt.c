@@ -5712,7 +5712,9 @@ static int bnxt_init_chip(struct bnxt *bp, bool irq_re_init)
 	}
 	vnic->uc_filter_count = 1;
 
-	vnic->rx_mask = CFA_L2_SET_RX_MASK_REQ_MASK_BCAST;
+	vnic->rx_mask = 0;
+	if (bp->dev->flags & IFF_BROADCAST)
+		vnic->rx_mask |= CFA_L2_SET_RX_MASK_REQ_MASK_BCAST;
 
 	if ((bp->dev->flags & IFF_PROMISC) && bnxt_promisc_ok(bp))
 		vnic->rx_mask |= CFA_L2_SET_RX_MASK_REQ_MASK_PROMISCUOUS;
@@ -5917,7 +5919,7 @@ unsigned int bnxt_get_max_func_irqs(struct bnxt *bp)
 	return min_t(unsigned int, hw_resc->max_irqs, hw_resc->max_cp_rings);
 }
 
-void bnxt_set_max_func_irqs(struct bnxt *bp, unsigned int max_irqs)
+static void bnxt_set_max_func_irqs(struct bnxt *bp, unsigned int max_irqs)
 {
 	bp->hw_resc.max_irqs = max_irqs;
 }
@@ -6888,7 +6890,7 @@ static int __bnxt_open_nic(struct bnxt *bp, bool irq_re_init, bool link_re_init)
 		rc = bnxt_request_irq(bp);
 		if (rc) {
 			netdev_err(bp->dev, "bnxt_request_irq err: %x\n", rc);
-			goto open_err;
+			goto open_err_irq;
 		}
 	}
 
@@ -6928,6 +6930,8 @@ static int __bnxt_open_nic(struct bnxt *bp, bool irq_re_init, bool link_re_init)
 open_err:
 	bnxt_debug_dev_exit(bp);
 	bnxt_disable_napi(bp);
+
+open_err_irq:
 	bnxt_del_napi(bp);
 
 open_err_free_mem:
@@ -7214,13 +7218,16 @@ static void bnxt_set_rx_mode(struct net_device *dev)
 
 	mask &= ~(CFA_L2_SET_RX_MASK_REQ_MASK_PROMISCUOUS |
 		  CFA_L2_SET_RX_MASK_REQ_MASK_MCAST |
-		  CFA_L2_SET_RX_MASK_REQ_MASK_ALL_MCAST);
+		  CFA_L2_SET_RX_MASK_REQ_MASK_ALL_MCAST |
+		  CFA_L2_SET_RX_MASK_REQ_MASK_BCAST);
 
 	if ((dev->flags & IFF_PROMISC) && bnxt_promisc_ok(bp))
 		mask |= CFA_L2_SET_RX_MASK_REQ_MASK_PROMISCUOUS;
 
 	uc_update = bnxt_uc_list_updated(bp);
 
+	if (dev->flags & IFF_BROADCAST)
+		mask |= CFA_L2_SET_RX_MASK_REQ_MASK_BCAST;
 	if (dev->flags & IFF_ALLMULTI) {
 		mask |= CFA_L2_SET_RX_MASK_REQ_MASK_ALL_MCAST;
 		vnic->mc_list_count = 0;
@@ -8502,11 +8509,11 @@ int bnxt_get_max_rings(struct bnxt *bp, int *max_rx, int *max_tx, bool shared)
 	int rx, tx, cp;
 
 	_bnxt_get_max_rings(bp, &rx, &tx, &cp);
+	*max_rx = rx;
+	*max_tx = tx;
 	if (!rx || !tx || !cp)
 		return -ENOMEM;
 
-	*max_rx = rx;
-	*max_tx = tx;
 	return bnxt_trim_rings(bp, max_rx, max_tx, cp, shared);
 }
 
@@ -8520,8 +8527,11 @@ static int bnxt_get_dflt_rings(struct bnxt *bp, int *max_rx, int *max_tx,
 		/* Not enough rings, try disabling agg rings. */
 		bp->flags &= ~BNXT_FLAG_AGG_RINGS;
 		rc = bnxt_get_max_rings(bp, max_rx, max_tx, shared);
-		if (rc)
+		if (rc) {
+			/* set BNXT_FLAG_AGG_RINGS back for consistency */
+			bp->flags |= BNXT_FLAG_AGG_RINGS;
 			return rc;
+		}
 		bp->flags |= BNXT_FLAG_NO_AGG_RINGS;
 		bp->dev->hw_features &= ~(NETIF_F_LRO | NETIF_F_GRO_HW);
 		bp->dev->features &= ~(NETIF_F_LRO | NETIF_F_GRO_HW);
@@ -8683,22 +8693,6 @@ static int bnxt_init_mac_addr(struct bnxt *bp)
 #endif
 	}
 	return rc;
-}
-
-static void bnxt_parse_log_pcie_link(struct bnxt *bp)
-{
-	enum pcie_link_width width = PCIE_LNK_WIDTH_UNKNOWN;
-	enum pci_bus_speed speed = PCI_SPEED_UNKNOWN;
-
-	if (pcie_get_minimum_link(pci_physfn(bp->pdev), &speed, &width) ||
-	    speed == PCI_SPEED_UNKNOWN || width == PCIE_LNK_WIDTH_UNKNOWN)
-		netdev_info(bp->dev, "Failed to determine PCIe Link Info\n");
-	else
-		netdev_info(bp->dev, "PCIe: Speed %s Width x%d\n",
-			    speed == PCIE_SPEED_2_5GT ? "2.5GT/s" :
-			    speed == PCIE_SPEED_5_0GT ? "5.0GT/s" :
-			    speed == PCIE_SPEED_8_0GT ? "8.0GT/s" :
-			    "Unknown", width);
 }
 
 static int bnxt_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
@@ -8915,8 +8909,7 @@ static int bnxt_init_one(struct pci_dev *pdev, const struct pci_device_id *ent)
 	netdev_info(dev, "%s found at mem %lx, node addr %pM\n",
 		    board_info[ent->driver_data].name,
 		    (long)pci_resource_start(pdev, 0), dev->dev_addr);
-
-	bnxt_parse_log_pcie_link(bp);
+	pcie_print_link_status(pdev);
 
 	return 0;
 

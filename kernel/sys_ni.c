@@ -367,7 +367,7 @@ COND_SYSCALL(s390_pci_mmio_write);
 COND_SYSCALL_COMPAT(s390_ipc);
 
 /* powerpc */
-cond_syscall(ppc_rtas);
+COND_SYSCALL(rtas);
 COND_SYSCALL(spu_run);
 COND_SYSCALL(spu_create);
 COND_SYSCALL(subpage_prot);
@@ -432,3 +432,6 @@ COND_SYSCALL(setresgid16);
 COND_SYSCALL(setresuid16);
 COND_SYSCALL(setreuid16);
 COND_SYSCALL(setuid16);
+
+/* restartable sequence */
+COND_SYSCALL(rseq);
